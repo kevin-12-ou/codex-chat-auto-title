@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codex-chat-auto-title"
+version = "0.1.0"
+description = "Quiet Codex chat auto rename with asynchronous Stop hooks, daily limits and project protection"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "kevin-12-ou"}]
+keywords = ["codex", "codex-hooks", "auto-rename", "chat-titles", "windows"]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.6"]
+
+[project.urls]
+Repository = "https://github.com/kevin-12-ou/codex-chat-auto-title"
+Issues = "https://github.com/kevin-12-ou/codex-chat-auto-title/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rename"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+
+[tool.ruff]
+line-length = 100
+[tool.ruff.lint]
+select = ["E", "F", "I"]

@@ -1,0 +1,12 @@
+Codex Chat Auto Title
+Copyright (c) 2026 kevin-12-ou and contributors
+
+Portions of src/rename and the original test suite are derived from:
+  rename / rename-cli, by JingWen Fan
+  https://github.com/study8677/rename
+  Commit: abfb0151942bd0fbea32e10e5d1e6ae3fb7640f1
+  Copyright (c) 2026 JingWen Fan
+  License: MIT (see LICENSE)
+
+This repository is an independent community adaptation, not an official
+OpenAI product and not endorsed by OpenAI or the upstream project.
