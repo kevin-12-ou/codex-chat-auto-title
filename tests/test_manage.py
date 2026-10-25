@@ -69,3 +69,57 @@ def test_setup_rejects_shell_metacharacters_in_paths(monkeypatch):
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     with pytest.raises(RuntimeError, match="metacharacters"):
         manage.hook_definition()
+
+
+def test_first_prompt_install_migrates_owned_worker_without_touching_other_hooks(
+        tmp_path, monkeypatch):
+    runtime = tmp_path / "runtime"
+    monkeypatch.setattr(background, "RUNTIME", runtime)
+    monkeypatch.setattr(background, "SETTINGS", runtime / "background-settings.json")
+    monkeypatch.setattr(background, "stop", lambda: 0)
+    monkeypatch.setattr(manage, "set_startup", lambda **kw: None)
+    home = manage.codex_home()
+    home.mkdir(parents=True)
+    old = manage.hook_definition()
+    unrelated = {"type": "command", "command": "keep-another-stop-hook"}
+    original = {"hooks": {"Stop": [{"hooks": [old, unrelated]}]}}
+    (home / "hooks.json").write_text(json.dumps(original), encoding="utf-8")
+    args = argparse.Namespace(mode="first_prompt", model=None, reasoning_effort=None,
+                             max_calls_per_day=None, idle_seconds=None, startup=False, start=False)
+    assert manage.install(args) == 0
+    result = json.loads((home / "hooks.json").read_text("utf-8"))
+    assert result["hooks"]["Stop"] == [{"hooks": [unrelated]}]
+    new = result["hooks"]["UserPromptSubmit"][0]["hooks"][0]
+    assert "first_prompt.py" in new["command"] and "python.exe" in new["command"]
+    assert new["async"] is False and new["additionalContextLimit"] > 0
+    settings = background.read_json(background.SETTINGS, {})
+    since = settings["first_prompt_installed_at"]
+    assert settings["mode"] == "first_prompt" and settings["max_calls_per_day"] == 30
+    assert manage.install(args) == 0
+    assert json.loads((home / "hooks.json").read_text("utf-8")) == result
+    assert background.read_json(background.SETTINGS, {})["first_prompt_installed_at"] == since
+
+
+def test_project_scope_installs_to_project_without_writing_user_hooks(tmp_path, monkeypatch):
+    runtime = tmp_path / "runtime"
+    monkeypatch.setattr(background, "RUNTIME", runtime)
+    monkeypatch.setattr(background, "SETTINGS", runtime / "background-settings.json")
+    monkeypatch.setattr(background, "stop", lambda: 0)
+    monkeypatch.setattr(manage, "set_startup", lambda **kw: None)
+    args = argparse.Namespace(mode="first_prompt", project_root=tmp_path / "project",
+                             startup=False, start=False)
+    assert manage.install(args) == 0
+    assert (args.project_root / ".codex/hooks.json").is_file()
+    assert not (manage.codex_home() / "hooks.json").exists()
+    args.project_root = tmp_path / "different-project"
+    with pytest.raises(ValueError, match="scope"):
+        manage.install(args)
+
+
+def test_first_prompt_worker_start_does_not_spawn_process(tmp_path, monkeypatch, capsys):
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"mode":"first_prompt"}', encoding="utf-8")
+    monkeypatch.setattr(background, "SETTINGS", settings)
+    monkeypatch.setattr(background.subprocess, "Popen", lambda *a, **k: pytest.fail("spawned"))
+    assert background.start() == 0
+    assert "does not use" in capsys.readouterr().out

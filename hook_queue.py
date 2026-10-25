@@ -81,7 +81,7 @@ def main():
     try:
         settings_path = runtime / "background-settings.json"
         settings = json.loads(settings_path.read_text("utf-8")) if settings_path.exists() else {}
-        if settings.get("enabled", True):
+        if settings.get("enabled", True) and settings.get("mode", "hook_queue") == "hook_queue":
             payload = json.loads(sys.stdin.read(1024 * 1024))
             if isinstance(payload, dict):
                 enqueue(payload, runtime, delay=max(60, int(settings.get("idle_seconds", 600))))

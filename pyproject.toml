@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-chat-auto-title"
-version = "0.1.0"
-description = "Quiet Codex chat auto rename with asynchronous Stop hooks, daily limits and project protection"
+version = "0.2.0"
+description = "Codex first-message chat titles with UserPromptSubmit hooks and native set_thread_title"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

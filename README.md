@@ -1,106 +1,82 @@
-# Codex Chat Auto Title · Codex 聊天记录自动命名
+# Codex Chat Auto Title v2 · Codex 聊天自动命名
 
 [English](README.en.md) · [安装与排障](docs/TROUBLESHOOTING.md) · [实现原理](docs/ARCHITECTURE.md) · [AI 阅读入口](llms.txt)
 
-为 Windows 上的 Codex 聊天生成简短、便于搜索的标题。使用异步 **Stop Hook + SQLite 事件队列 + Python 后台**，只处理发生了新回复的聊天，避免轮询整个历史记录和弹出终端窗口。
+Windows 上的 Codex 新会话自动改名工具。**UserPromptSubmit Hook 在首条消息时补充一次规则；当前模型先完成任务，再在最终回复前调用 `set_thread_title`。** 后续追问不再注入命名规则。
 
-> 社区工具，非 OpenAI 官方产品。标题通过 Codex 的本地 SQLite 数据库写入；数据库结构可能随 Codex 更新而变化。支持范围为 Windows，实测 Codex CLI 0.154.0、Python 3.14；CI 检查 Python 3.11 / 3.13 / 3.14。macOS/Linux 后台服务尚未实现。
+标题采用 `模块名|持续目标`，包含分隔符在内最多 **24 个 Unicode 字符**，例如 `登录|完成微信授权登录`。模块使用易懂的业务名称，持续目标描述整条会话要达成的结果，避免“优化”“处理问题”等空话。
 
-## 解决什么问题
+> 独立社区工具，非 OpenAI 官方产品。需要带 Hooks 支持且提供 `set_thread_title` 的 Codex 桌面环境；其他客户端可能没有这个工具，此时静默跳过。Python 3.11+，Windows。兼容性和实测范围见 [验证记录](docs/VALIDATION.md)。
 
-默认标题经常是一整段初始提问，例如“GitHub 上有没有什么工具，可以帮我把聊天记录整理一下”。自动标题可以是“Codex 聊天自动命名”。模型会使用原对话的语言。
+## 第 2 版有什么变化
 
-- **安静触发**：Hook 只写聊天编号和轮次编号，立即返回 `{}`；模型调用在后台处理。
-- **不主动翻旧账**：安装不会扫描、批量重命名历史积压；旧聊天产生新回复后才可能入队。
-- **保护手动标题**：只接受能明确对应第一条提问的默认标题。不确定、置顶、归档、执行中、已处理的聊天跳过。
-- **保护 project 和排序**：只更新显示标题列；项目归属、工作目录、分组、置顶和所有时间字段保持不变。提交前验证该聊天其余字段，异常则回滚；起名期间移动聊天也会取消写入。
-- **限制用量**：默认每天所有聊天合计最多 30 次尝试，两次至少间隔 5 分钟；失败计入。它是上限，不是每天必须完成的数量。
-- **隔离当前聊天**：独立临时 `codex exec --ephemeral`，禁用其中的 Hook，避免递归。不切换当前聊天的模型，不修改全局 `config.toml`，不向当前聊天注入上下文。
-- **可停用、可还原**：原标题写入本地日志；只还原仍保持工具标题的聊天，保留之后的手动改名。
+- **默认不再运行后台、队列或独立模型请求**。不切换当前模型、不启动 subagent；当前模型多读一段简短规则并执行本地检查与改名工具，仍有正常对话的 token/工具开销。
+- **只认真正的新会话首轮**。结合安装时间、会话元数据、当前 turn 和有上限的本地历史检查；不是“安装后第一次看到就算新会话”。历史不明确、分叉、子代理、归档或置顶会话跳过。
+- **保护手动标题**。注入时确认是可识别的默认标题；最终改名前再次检查。任务期间手动改名或移动 project/分组，就取消这次自动命名。
+- **后续静默**。本地 SQLite 只记录一次许可，重复或并发 Hook 不重复发规则；许可限定首轮，追问、取消或压缩后失效。失败不启动其他方式补救。
+- **原生改名**。调用当前会话的 `set_thread_title`，不移动聊天、不更改全局排序配置。不会为了给旧聊天改名而把它们推到前面。
+- **保留 V1 兼容模式**。旧的 Luna High / 每日 30 次只约束可选后台模式；V2 不单独发命名请求，因此不使用这个计数。
 
-## 需要什么、会读取什么
+**保护边界**：原生工具没有暴露“仅当标题未变才写入”的原子接口。本地检查与工具调用之间仍有很短的竞争窗口，也依赖模型遵守一次性规则；不能保证所有客户端、手动操作时序或桌面排序实现都完全一致。程序不会强行倒改时间。手动标题恰好等于默认标题时，无法判断作者。
 
-需要 Windows、Python 3.11+（含 `pythonw.exe`）、带 Hooks 支持的 Codex，以及已安装并登录的 Codex CLI。`codex --version` 应能在终端运行。建议先确认 CLI 与桌面应用使用同一个 Codex 登录及 `CODEX_HOME`。
+## 安装和批准 Hook
 
-程序没有第三方运行依赖，也不要求额外 API Key。**起名会消耗现有 Codex 账号/所配置服务的额度**，不是免费模型调用；每日次数上限不等于费用或 token 上限。默认模型为 `gpt-6-luna / high`，需要账号实际支持。其他账号请通过 `--model` 指定可用模型；失败不会自动切到更贵的模型。
-
-Hook 不读取聊天正文。后台会读取目标聊天的本地记录，将压缩后的摘录（最多约 3200 字符）交给现有 Codex CLI 配置的模型服务。请不要对包含不宜发送给该服务的数据启用此功能。本地 `runtime/` 含原标题、线程编号和路径，属于私人运行数据，禁止上传。
-
-## 安装
-
-下载 [最新 Release ZIP](https://github.com/kevin-12-ou/codex-chat-auto-title/releases/latest)，解压到准备长期保留的目录，例如 `D:\Tools\codex-chat-auto-title`。也可以克隆本仓库。安装后不要随意移动目录，Hook 使用绝对路径。
-
-在该目录打开 PowerShell，审阅代码后运行：
+下载 [最新 Release ZIP](https://github.com/kevin-12-ou/codex-chat-auto-title/releases/latest)，解压到长期保留的目录。在完整源码目录打开 PowerShell：
 
 ```powershell
-python -X utf8 manage.py install --model gpt-6-luna --reasoning-effort high --max-calls-per-day 30 --startup --start
+python -X utf8 manage.py install
+python -X utf8 manage.py doctor
 ```
 
-`--startup` 选择登录 Windows 后自启，`--start` 选择立即启动。安装只合并本工具的 Stop Hook，保留其他 Hooks，并先备份已有 `hooks.json`。重复运行不会重复添加，也不会重置已经停用的设置。
-
-**首次必须由你审阅并信任 Hook**：打开 Codex → 设置 → Hooks → 刷新，找到 `Codex Chat Auto Title: enqueue only`，确认命令指向你刚解压的目录并信任。程序不会自动修改信任记录。Hook 机制参考 [官方说明](https://learn.chatgpt.com/docs/hooks)。
-
-如果已有其他版本的自动命名工具，请先停用旧工具，避免两个后台争用同一聊天或分别消耗额度。这里的 30 次上限只约束本工具。
-
-## 使用与设置
-
-正常聊天即可：回复结束后入队，连续空闲 10 分钟再考虑起名。仍在进行的回复不处理。
+默认安装到用户 `CODEX_HOME/hooks.json`，便于不同 project 的新会话使用。只想在某个项目启用：
 
 ```powershell
-python -X utf8 manage.py doctor     # 检查 CLI、配置、后台；不调用模型
-python -X utf8 manage.py status     # 查看后台和本工具的当日计数
-python -X utf8 manage.py disable    # 持久停用 Hook 入队并停止后台
-python -X utf8 manage.py enable     # 恢复启用并启动后台
-python -X utf8 manage.py uninstall  # 移除本工具 Hook 和自启，保留标题和运行日志
+python -X utf8 manage.py install --project-root 'D:\Projects\my-project'
 ```
 
-`start` / `stop` 只控制当前后台，`disable` 才会持久停用。停用后可能仍有已经发出的模型请求完成，但已停止的后台不会继续提交标题。
+同一份安装只使用一个配置位置；更换范围前先 uninstall。项目 Hook 会按 Codex 的加载与信任规则生效，项目目录不会被上传。
 
-设置在 `runtime/background-settings.json`，后台每分钟重新读取：
+**批准步骤**：Codex → 设置 → Hooks → 刷新 → 找到 **`Codex Chat Auto Title v2: first message only`** → 审阅 `python.exe -X utf8 .../first_prompt.py` 命令 → 允许/信任。若没出现，重新打开该项目或应用后刷新。安装器不会写信任数据库。批准后新建一条会话测试，当前这条旧会话不会补命名。
 
-| 设置 | 默认值 | 含义 |
-|---|---:|---|
-| `model` | `gpt-6-luna` | 使用你的账号支持的模型 |
-| `reasoning_effort` | `high` | 独立起名请求的推理强度 |
-| `max_calls_per_day` | `30` | 所有聊天合计，按本机日期，失败计入 |
-| `idle_seconds` | `600` | 同一聊天回复后等待的空闲时间 |
-| `min_call_interval_seconds` | `300` | 全局请求间隔 |
-| `failure_backoff_seconds` | `1800` | 失败后全局退避时间 |
-| `poll_seconds` | `60` | 检查本机队列的间隔，不会每分钟请求模型 |
-| `enabled` | `true` | 总开关 |
+新 Hook 是同步的，因为必须在首条消息发送给模型前提供规则；不是旧的异步 Stop Hook。使用 UTF-8 JSON 输出。它只读取当前线程的本地元数据和最多 2 MiB 的会话记录，不执行正文指令，不单独调用模型。
 
-同一失败事件不会定时反复请求；这条聊天出现新回复后才可能重新入队。模型返回与默认标题一样也记作已处理，避免重复消耗。不要删除 `runtime/`，否则会丢失计数、手动保护和还原记录。
+## 升级 V1
 
-## project、旧聊天与排序
+在原安装目录保留私人 `runtime/`，覆盖新源码，然后运行 `python -X utf8 manage.py install`。同目录的安装器会移除自己登记的旧 Hook，停用旧后台并移除自己拥有的自启，再安装 V2 Hook；必须重新审阅信任新 Hook。
 
-自动命名不调用“移动聊天”，不改 `project_id`、`cwd`、`thread_section_id`、`section_position`、`is_pinned`、`updated_at*` 或 `recency_at*`。如果写入触发了这些字段或该行其他字段变化，事务会回滚。
+其他路径或第三方安装的 Hook/自启不会被自动删除；先停用它们，避免重复命名。不要把第二份工具安装到另一处后让两份同时运行。已有标题不重置，旧的日志和还原标题功能保留。
 
-这能约束本工具的写入，不能保证 Codex 在打开、恢复、同步或迁移旧聊天时不刷新排序。我们不会强行恢复历史时间戳，也不更改你的侧栏排序偏好。若发现聊天位置变化，先查看 [排障说明](docs/TROUBLESHOOTING.md)。
-
-数据库没有“谁改过标题”的标记，因此无法百分之百识别所有手动标题；手动标题恰好与默认文本完全一致时也无法区分。本工具采用保守匹配，宁可漏掉一部分默认标题。project 归属还可能由应用根据工作目录解释，不能只凭数据库 `project_id` 为空断言聊天不在 project。
-
-## 还原标题
+## 开关和诊断
 
 ```powershell
+python -X utf8 manage.py status
 python -X utf8 manage.py disable
-python -X utf8 background.py restore           # 只预览
-python -X utf8 background.py restore --apply   # 确认后实际还原
+python -X utf8 manage.py enable
+python -X utf8 manage.py uninstall
 ```
 
-仅使用成功写入的日志记录；当前标题已经被你手动改过则跳过。不会用旧数据库覆盖新增聊天。还原也是本地写入，升级 Codex 后请先确认兼容性。
+V2 的 enable 不启动后台；start 只提示无需后台。disable 会阻止尚未领取的命名许可，但已经通过许可检查的原生工具调用无法撤回。uninstall 只移除当前安装登记的 Hook/自启，保留已有标题和运行记录。
 
-## 开发与验证
+设置位于 `runtime/background-settings.json`，V2 使用 `enabled`、`mode=first_prompt` 和首次安装时间。不要删除 `runtime/first-prompt.sqlite` 或修改安装时间，否则会丢失一次性状态。
+
+如确实需要独立模型后台，使用 [V1 模式说明](docs/LEGACY.md)：
 
 ```powershell
-python -m pip install -e ".[dev]"
-python -m pytest -q
-python -m ruff check src tests background.py hook_queue.py manage.py
+python -X utf8 manage.py install --mode hook_queue --model gpt-6-luna --reasoning-effort high --max-calls-per-day 30 --startup --start
 ```
 
-从完整源码目录运行 `manage.py`；当前分发方式是源码 ZIP，尚未发布 PyPI 安装入口。继承的 `src/rename` 是内部复用代码，推荐入口仅为本 README 中的命令，旧通用 `rename` 扫描工作流不属于本项目的用量和保护承诺。
+## 数据与限制
 
-测试覆盖去重、失败退避、额度、手动标题、项目移动竞态、标题写入回滚和安装合并。[验证边界](docs/VALIDATION.md) 区分自动测试、真实模型验证和桌面显示行为。
+无第三方运行依赖，不需要额外 API Key。V2 不额外发送聊天摘录，只向当前对话补一段命名规则。本地 `runtime/` 包含标题快照、线程/轮次 ID、路径和许可记录，禁止上传。默认不记录完整提问，候选标题使用哈希保存；快照可能含原有标题。
 
-## 来源与许可证
+无法证明首轮、历史过大/缺失、数据库不可读、工具缺失、用户已改名或规则未被模型执行时，会保留原标题。客户端如果在 Hook 前自动生成了无法识别的短标题，也会保守跳过。不会强制继续任务或为改名重新唤醒会话。
 
-MIT。复用 [study8677/rename](https://github.com/study8677/rename) 在提交 `abfb0151942bd0fbea32e10e5d1e6ae3fb7640f1` 的部分核心代码，保留原作者 JingWen Fan 的版权和许可证。异步队列、Windows 静默运行、默认标题保护、次数限制、项目保护和安装管理在此分支维护。详见 [NOTICE](NOTICE)。
+## 开发与来源
+
+```powershell
+python -m pip install -e '.[dev]'
+python -X utf8 -m pytest -q
+python -X utf8 -m ruff check .
+```
+
+完整源码 ZIP/checkout 是支持的安装方式，不使用继承的通用 `rename` CLI。部分库代码来自 [study8677/rename](https://github.com/study8677/rename)，保留 MIT 许可与 [NOTICE](NOTICE)。新 Hook、许可与 Windows 管理由本项目实现。官方事件格式见 [Codex Hooks](https://learn.chatgpt.com/docs/hooks)。

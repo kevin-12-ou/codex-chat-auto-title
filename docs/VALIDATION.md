@@ -1,4 +1,16 @@
-# Validation boundaries
+# V2 validation boundaries
+
+Version 0.2.0: **193 tests pass locally**, Ruff passes. CI uses Windows/Python 3.11, 3.13 and 3.14. Automated checks use synthetic local stores.
+
+A real Windows command-shell smoke test completed legacy install with an owned startup shortcut → V2 migration → synchronous UTF-8 Hook delivery → duplicate suppression → one-time claim → disable → enable → uninstall. The old owned shortcut was removed and an unrelated Stop hook preserved. No worker or model request was created in V2; no real chat title was changed.
+
+Tests cover first-turn injection and claim, duplicate/concurrent issue and consumption, UTF-8 process stdout, malformed input, previous-user history, turn change/cancellation/compaction, manual rename and project/cwd/section changes, archived/pinned/subagent/fork/pre-install exclusion, default-title creation races, title format/length, disabled mode, user/project Hook scope, migration/idempotency and no worker start in V2. Native Hook/claim subprocess tests do not call a model or rename real chats.
+
+The local upgrade installs a new synchronous Hook and stops the legacy worker. Hook trust is a human action; real new-chat delivery, native title execution, desktop visibility and title quality require verification after trust. Tests are not evidence of that end-to-end desktop result. No additional model call is needed for the automated checks.
+
+Known limits: native API write is outside the preflight transaction; manual rename can race after claim, model may ignore rules, tool may be unavailable, schemas/context wrappers may change, and internal UI ordering is not controlled. Unclear history fails closed. V2 is not a general cache/quality fix or a guarantee of zero token overhead.
+
+# V1 validation history
 
 Release 0.1.0, Windows development verification:
 

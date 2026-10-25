@@ -1,28 +1,32 @@
-# Architecture
+# V2 architecture
 
-```mermaid
-flowchart LR
-  A[Completed Codex reply] --> B[Trusted async Stop hook]
-  B --> C[Local SQLite queue]
-  C --> D[Python worker: idle and quota checks]
-  D --> E[Default title and activity guards]
-  E --> F[Ephemeral Codex CLI naming call]
-  F --> G[Compare snapshot and update title transaction]
-  G --> H[Verify other row fields and commit]
+Default mode: `first_prompt`; optional V1 mode: `hook_queue`.
+
+```text
+UserPromptSubmit -> Python (synchronous, UTF-8)
+  -> enabled? UUID IDs? root agent? new since install?
+  -> read only current thread row and canonical bounded transcript
+  -> reject old/forked/ambiguous/manual/pinned/archived threads
+  -> SQLite INSERT OR IGNORE: one first-turn ticket
+  -> JSON additionalContext: finish task, then name once
+current model finishes first task
+  -> first_prompt.py --claim THREAD TURN --title TITLE
+  -> validate <=24 code points, one |, meaningful goal shape
+  -> transaction: consume ticket, verify current title/project/section/turn
+  -> allowed=true -> native set_thread_title for current chat
+follow-ups -> no additionalContext, no extra naming process
 ```
 
-The hook stores UUID thread IDs, bounded turn IDs, generation IDs and debounce deadlines. It does not open paths from hook input or call a model. Exceptions are quiet; the host receives `{}` and exit code 0. Per-thread upsert and per-generation completion prevent duplicate events and preserve a new event arriving during a model call.
+The hook is synchronous so rules are available before the first model request. `python.exe` supplies redirected UTF-8 stdout (pythonw has no streams). The installed Codex host is responsible for hiding command-hook consoles. No worker or model subprocess is launched in V2.
 
-The Windows worker holds a single-instance byte lock. Empty-queue passes never discover threads or read transcripts. Ready events query only their thread ID. The worker excludes archived, pinned, subagent and active threads, and conservatively protects custom/unknown titles.
+A preflight reads Codex's highest-version local state SQLite, then opens only the canonical rollout path contained within `CODEX_HOME/sessions`. Never open payload-supplied paths. Reads are capped at 2 MiB; malformed, compacted or unrecognized history fails closed. Metadata must identify the same thread, all persisted turn markers must identify the first current turn, and prior actual user/assistant history causes submission rejection. Claiming may include first-turn assistant activity. Reserved environment/AGENTS/page context wrappers are excluded from user-message comparison. Unknown wrappers can cause safe false negatives.
 
-A daily counter reserves an attempt before invoking Codex. Failure counts; local-date rollover resets the daily count. Minimum spacing and global failure backoff apply independently. A failed event is completed rather than repeatedly retried by the timer. Later replies can enqueue a new event.
+Local `runtime/first-prompt.sqlite` stores IDs, status, canonical DB path, protected-field snapshot and candidate-title hashes. It stores no full prompt text. Snapshot includes original display title and may be sensitive. Unique thread key and immediate claim transaction handle duplicates/concurrent invocation. Claim checks enabled mode, title shape and first-turn identity, then consumes before native tool use. Failure never starts a fallback writer or model. Later events do not reissue instructions.
 
-Naming uses the existing CLI login in an isolated scratch working directory. `--ephemeral`, `--sandbox read-only`, disabled hooks, lightweight context and argv-based invocation prevent persisted naming sessions and recursion. On Windows, native Codex is preferred over npm's Node wrapper and child processes use `CREATE_NO_WINDOW`. No global model settings are changed. CLI capability errors fail closed rather than dropping ephemeral flags.
+The model receives only the fixed rules, IDs and local guard command. It must run the guard before the native tool, omit threadId to target this chat, skip missing tool and never explain naming. This is a cooperative model workflow, not an enforcement sandbox. Model noncompliance is possible. Check-to-native-call is not atomic; a manual rename in that gap can race. Native API can have client-specific ordering behavior. V2 cannot claim V1's transaction-wide all-other-fields postcondition around a desktop API call.
 
-Only the applicable display field is changed: paginated `name`, legacy `title`. `BEGIN IMMEDIATE` protects read/compare/write; a discovery snapshot detects title, activity, project and section changes while inference was running. Before commit the entire target row is compared with the original row plus the intended title. Other-field changes, including trigger effects, roll back the transaction. This is not a promise about unrelated application activity or future triggers that modify other rows/tables.
+Install merges only exact owned command hooks, backs up hooks.json, preserves unrelated handlers and supports a single user/project scope. Trust is always reviewed in Codex. Legacy worker exits immediately if V2 mode is active, including if an obsolete startup shortcut invokes it.
 
-The private journal records prepared and applied entries. Restore accepts only applied entries and a matching current title. It never restores an entire database. Runtime counters, locks and journals belong to one installation; do not run multiple installations against the same Codex home.
+## Legacy mode
 
-The installer merges only its exact hook command, backs up existing hook configuration and optionally creates a hidden Windows startup shortcut. Trust remains a human action. `disable` persists the disabled switch before stopping the worker; `uninstall` removes its hook and owned shortcut, retaining runtime data.
-
-The underlying reusable `src/rename` library includes other upstream adapters. The supported background path instantiates only `GuardedCodex`; it never discovers those other tools. Its generic CLI is not the installation interface for this project.
+See [legacy worker architecture](LEGACY-ARCHITECTURE.md). `background.py` and `hook_queue.py` remain for explicit `--mode hook_queue`; their title-only transactional protection and daily budget remain available. V2 never writes Codex title fields directly. `background.py restore` applies only to the legacy journal, not native V2 renames.

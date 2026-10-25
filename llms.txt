@@ -1,20 +1,21 @@
-# Codex Chat Auto Title
+# Codex Chat Auto Title v2
 
-> Windows utility for automatic Codex chat/session title generation using an asynchronous Stop hook, a local SQLite event queue, and a separate ephemeral Codex CLI request. Chinese: Codex 聊天记录自动命名、会话标题重命名、Hooks 自动起名。
+> Windows Codex new-chat auto rename / 聊天记录自动命名 / UserPromptSubmit hook / set_thread_title.
 
 Canonical repository: https://github.com/kevin-12-ou/codex-chat-auto-title
-License: MIT; partial derivative of study8677/rename, credited in NOTICE.
-Community project; not an official OpenAI tool.
+Community MIT project, not an official OpenAI product. Credits: NOTICE, study8677/rename.
 
-- [中文说明](https://github.com/kevin-12-ou/codex-chat-auto-title/blob/main/README.md)
-- [English guide](https://github.com/kevin-12-ou/codex-chat-auto-title/blob/main/README.en.md)
+- [Chinese](https://github.com/kevin-12-ou/codex-chat-auto-title/blob/main/README.md)
+- [English](https://github.com/kevin-12-ou/codex-chat-auto-title/blob/main/README.en.md)
 - [Architecture](https://github.com/kevin-12-ou/codex-chat-auto-title/blob/main/docs/ARCHITECTURE.md)
-- [Troubleshooting](https://github.com/kevin-12-ou/codex-chat-auto-title/blob/main/docs/TROUBLESHOOTING.md)
-- [Validation boundaries](https://github.com/kevin-12-ou/codex-chat-auto-title/blob/main/docs/VALIDATION.md)
+- [Validation](https://github.com/kevin-12-ou/codex-chat-auto-title/blob/main/docs/VALIDATION.md)
+- [Legacy worker](https://github.com/kevin-12-ou/codex-chat-auto-title/blob/main/docs/LEGACY.md)
 
-Requires Windows, Python 3.11+ with pythonw.exe, Codex Hooks, and a logged-in Codex CLI. No extra API key or third-party runtime dependency. Naming consumes the existing CLI provider/account allowance and sends a short transcript excerpt to that provider. Default gpt-6-luna/high is configurable; model availability must be checked by the user.
+Default V2: synchronous UserPromptSubmit hook injects rules once on a genuinely new first turn. Current model completes task, validates a local one-time permission and calls native set_thread_title before final reply. Format module|ongoing goal, <=24 Unicode code points. Follow-ups do not reinject. No worker, model switch, subagent or separate naming-model request; normal context/tool token overhead applies.
 
-Install from a complete source directory: python -X utf8 manage.py install --model YOUR_AVAILABLE_MODEL --reasoning-effort high --max-calls-per-day 30 --startup --start
-The human must review and trust the installed hook in Codex Settings > Hooks.
+Install from full source: python -X utf8 manage.py install
+Optional project scope: --project-root PATH. Requires Windows Python 3.11+, Codex Hooks and desktop set_thread_title. Human reviews/trusts Codex Chat Auto Title v2: first message only in Settings > Hooks.
 
-Only recognized default titles are eligible; manual/uncertain, pinned, archived, running and already-processed chats are protected. Existing history is not batch-scanned. Only title fields are written; projects and ordering timestamps are preserved. Uses internal SQLite schema, which may change after Codex updates. Supported interface: manage.py and background.py, not the inherited generic rename CLI.
+Reads canonical current metadata/transcript only, bounded to 2 MiB. Skips historical/manual/ambiguous/pinned/archived/fork/subagent chats. Preflight protects manual title/project moves before claim; not atomic with native API, model compliance and UI ordering not guaranteed. Private runtime must not be shared.
+
+Explicit legacy mode hook_queue retains Stop hook, SQLite queue, isolated CLI model, title-only transactional writes, optional startup and daily budget. It is not active alongside default V2.

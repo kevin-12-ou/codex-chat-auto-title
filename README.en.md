@@ -1,81 +1,62 @@
-# Codex Chat Auto Title
+# Codex Chat Auto Title v2
 
-[中文](README.md) · [Architecture](docs/ARCHITECTURE.md) · [AI-readable overview](llms.txt)
+[中文](README.md) · [Architecture](docs/ARCHITECTURE.md) · [Validation](docs/VALIDATION.md)
 
-Quiet automatic chat renaming for **Codex on Windows**. An asynchronous **Stop hook** enqueues a thread ID. A lightweight **Python worker** waits for idle time, summarizes a short excerpt using your existing Codex CLI login, and changes only the display title.
+First-message automatic chat titles for Codex on Windows. A synchronous **UserPromptSubmit hook** injects one short instruction into a genuinely new first turn. The current model completes the user's task, checks a local one-time permission, then calls the desktop **set_thread_title** tool before its final response. No explanation about naming is added to the reply.
 
-Independent community tool, not an OpenAI product. It writes Codex's internal local SQLite store. Tested with Codex CLI **0.154.0**, Windows and Python 3.14. Python 3.11+ is required. macOS/Linux service installation is not implemented.
+Format: `module|ongoing goal`, at most **24 Unicode code points including the separator**. Prefer understandable business/function names and the outcome of the whole conversation, not the current step or vague goals such as “optimize”. Example: `Login|Ship WeChat auth`.
 
-## Why
+## Install and trust
 
-- Short searchable titles in the conversation's language, instead of long first-message titles.
-- No startup scan of old history. Only a new completed reply can enqueue a chat.
-- Hidden Windows processes; no visible terminal required for background naming.
-- Conservative default-title matching: manual/uncertain titles, pinned, archived and running chats are skipped.
-- Projects, directories, sections, pinning and ordering timestamps are preserved. Concurrent moves cancel the write. A transaction checks all other fields of the affected row before commit.
-- Default: **30 naming attempts per local day across all chats**, 10 minutes idle, at least 5 minutes between calls. Failures count. No timer-driven retries for a failed event.
-- Separate ephemeral CLI invocation; the current chat's model, context and global Codex configuration are unchanged. Hooks are disabled inside the naming invocation to prevent recursion.
-
-## Install
-
-Requires Windows, Python 3.11+ including `pythonw.exe`, Codex with Hooks, and an installed/logged-in Codex CLI available as `codex` on PATH. CLI and desktop must use the same intended Codex home/account.
-
-Download and extract the [latest release](https://github.com/kevin-12-ou/codex-chat-auto-title/releases/latest) into a permanent directory. Review the code, then run in PowerShell:
+Requires Windows, Python 3.11+ and a Codex environment supporting Hooks and the desktop `set_thread_title` tool. Other clients may lack this tool and will skip naming. Use the complete source ZIP/checkout, not a wheel alone.
 
 ```powershell
-python -X utf8 manage.py install --model gpt-6-luna --reasoning-effort high --max-calls-per-day 30 --startup --start
+python -X utf8 manage.py install
+python -X utf8 manage.py doctor
 ```
 
-Choose a model actually available to your account. `gpt-6-luna / high` is the deployment default, not a promise of availability for every account. No fallback to another model occurs on failure.
+Default scope is the user's `CODEX_HOME/hooks.json`. For project-local scope, use `install --project-root 'D:\Projects\my-project'`. One installation manages one scope; uninstall before changing scope.
 
-`--startup` opts into Windows sign-in startup; `--start` starts immediately. Existing hooks are merged and backed up. Reinstallation is idempotent and preserves your existing disabled setting.
+Open **Codex > Settings > Hooks**, refresh, review **Codex Chat Auto Title v2: first message only**, verify its `python.exe -X utf8 .../first_prompt.py` command and trust it. Reopen the project/application if discovery needs a reload. Trust is never granted automatically. Start a new chat to test; existing chats are excluded.
 
-Open **Codex → Settings → Hooks**, refresh, review **Codex Chat Auto Title: enqueue only**, and trust it yourself. The installer never bypasses trust. See the [official Hooks documentation](https://learn.chatgpt.com/docs/hooks). Keep the installation directory in place. Disable other auto-title tools before installing this one.
+## Behavior and boundaries
 
-## Usage
+- No background worker, startup task, subagent, model switch or separate naming-model request in default V2 mode. Normal context/tool token overhead still applies.
+- Uses installation time, canonical local metadata and bounded transcript inspection to exclude historical, forked, subagent, pinned, archived and ambiguous threads. First seen is not first message.
+- Only recognized default titles qualify. A preflight check skips manual renames and project/section moves made during the task. Manual titles identical to defaults cannot be distinguished.
+- SQLite deduplication issues and consumes at most one permission. Follow-up turns, cancellation and compaction expire it. No automatic retry or alternative write path.
+- The native tool changes the current title; no move/project tool or global sidebar sort setting is used. The native API is outside the local transaction: a narrow manual-rename race remains between preflight and API execution. Model compliance and UI ordering are not guaranteed by fixture tests.
+- No new history scan, no historical backfill, no timestamp restoration. Missing/incompatible history, missing tool or model noncompliance retains the original title.
+
+`runtime/` contains private title snapshots, IDs, paths and permissions. Do not upload it. Prompt candidates are stored as hashes, not full prompt text; snapshots may contain the original title. V2 adds rules to the current conversation and sends no separate transcript excerpt. No extra API key or runtime dependencies.
+
+## Upgrade, control and legacy mode
+
+Keep private `runtime/`, replace source in the existing installation and run `manage.py install`. The installer stops its owned V1 worker, removes its registered old hook/startup and installs V2. Review and trust the new hook. Other installations/third-party hooks are not removed automatically.
 
 ```powershell
-python -X utf8 manage.py doctor
 python -X utf8 manage.py status
 python -X utf8 manage.py disable
 python -X utf8 manage.py enable
 python -X utf8 manage.py uninstall
 ```
 
-Normal completed replies enqueue chats automatically. `doctor` and `status` do not call a model. `disable` persists across restarts; `stop` only stops the current worker. Uninstall removes this installation's exact hook and owned startup shortcut, retaining runtime data and existing titles. An already dispatched request may still finish after stopping; the stopped worker cannot commit its result.
+V2 enable/start does not spawn a worker. Disable blocks unclaimed permissions; an already-approved native tool call cannot be revoked. Uninstall preserves titles and runtime. Do not delete one-time state.
 
-Edit `runtime/background-settings.json` to adjust `model`, `reasoning_effort`, `max_calls_per_day`, `idle_seconds`, `min_call_interval_seconds`, `failure_backoff_seconds`, `poll_seconds` or `enabled`. The worker reloads it every minute. The limit is a maximum, not a daily target or a currency/token budget. It covers this tool, not your other Codex activity.
-
-## Privacy and cost
-
-There are no third-party runtime dependencies or extra API keys. **Naming uses your existing Codex/configured provider allowance.** The worker reads the target transcript locally and sends a shortened excerpt of up to approximately 3,200 characters to the service configured in your Codex CLI. Do not enable it for data you cannot send there.
-
-The hook itself only records thread/turn IDs. `runtime/` contains private titles, paths and IDs; never publish it. Losing runtime state loses idempotency, manual-title locks, daily counters and restore history.
-
-## Projects and ordering
-
-Only `name` (paginated history) or `title` (legacy history) is updated. Project ID, cwd, sections, pinning, ordinary update timestamps and separate recency timestamps stay unchanged. Schema-trigger changes to other fields in that row cause rollback.
-
-This protects this tool's writes. Codex may independently refresh order when opening, resuming, syncing or migrating history. We do not force historical timestamps backward or change sidebar preferences. The database also lacks a reliable title-author flag: manually setting exactly the default text is indistinguishable from a default title.
-
-## Restore
+Optional [legacy Stop-hook worker](docs/LEGACY.md):
 
 ```powershell
-python -X utf8 manage.py disable
-python -X utf8 background.py restore
-python -X utf8 background.py restore --apply
+python -X utf8 manage.py install --mode hook_queue --model gpt-6-luna --reasoning-effort high --max-calls-per-day 30 --startup --start
 ```
 
-Preview first. Only successfully applied journal entries whose current title still matches the tool's last title can be restored. Later manual edits are preserved. No old database is copied over live history. Review compatibility before restoring after a Codex upgrade.
+Only legacy mode uses the separate model, daily cap, excerpt sending and transactional SQLite title writer. V2 uses the active model and does not use that daily counter.
 
 ## Development
 
 ```powershell
-python -m pip install -e ".[dev]"
-python -m pytest -q
-python -m ruff check src tests background.py hook_queue.py manage.py
+python -m pip install -e '.[dev]'
+python -X utf8 -m pytest -q
+python -X utf8 -m ruff check .
 ```
 
-Use the complete source checkout/ZIP; this project is not published on PyPI. `src/rename` includes inherited internal library code; the older general-purpose scanning CLI is outside this project's supported workflow and limits. See [validation boundaries](docs/VALIDATION.md).
-
-MIT, derived in part from [study8677/rename](https://github.com/study8677/rename), commit `abfb0151942bd0fbea32e10e5d1e6ae3fb7640f1`. Original copyright retained. See [NOTICE](NOTICE).
+Independent community project, not an OpenAI product. See [official Hooks documentation](https://learn.chatgpt.com/docs/hooks). MIT; includes code derived from [study8677/rename](https://github.com/study8677/rename), credited in NOTICE. Inherited generic rename CLI is an internal library interface, not the supported installation entrypoint.

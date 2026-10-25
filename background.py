@@ -91,16 +91,14 @@ def turn_is_open(path):
     return opened
 
 
-def is_default_title(name, first_message):
+def default_title_candidates(first_message):
     """Positive matches only; custom or unknown historical names stay untouched.
 
     Codex has no author-of-name flag. This intentionally misses some defaults
     rather than guessing that an unrelated short name belongs to the app.
     """
     if not first_message or not first_message.strip():
-        return False
-    if not name or not name.strip():
-        return True
+        return set()
     texts = [first_message]
     request = re.search(r"^## My request:\s*\n(.*)", first_message, re.M | re.S)
     if request:
@@ -114,7 +112,15 @@ def is_default_title(name, first_message):
             candidates.add(normalized)
             if len(normalized) > 60:
                 candidates.add(normalized[:59].rstrip() + "…")
-    return " ".join(name.split()) in candidates
+    return candidates
+
+
+def is_default_title(name, first_message):
+    if not first_message or not first_message.strip():
+        return False
+    return not name or not name.strip() or " ".join(name.split()) in default_title_candidates(
+        first_message
+    )
 
 
 class GuardedCodex(CodexAdapter):
@@ -284,6 +290,8 @@ def process_alive(pid):
 def run():
     import msvcrt
 
+    if read_json(SETTINGS, {}).get("mode") == "first_prompt":
+        return 0
     RUNTIME.mkdir(parents=True, exist_ok=True)
     # The held byte lock prevents a second instance from overwriting state or
     # duplicating model requests, including after Windows sign-in.
@@ -303,6 +311,8 @@ def run():
         util.log("Quiet Stop-hook worker started; historical scanning disabled")
         while True:
             settings = {**DEFAULTS, **read_json(SETTINGS, {})}
+            if settings.get("mode") == "first_prompt":
+                return 0
             try:
                 outcome = process_pending(settings, state)
                 write_json(RUNTIME / "heartbeat.json", {
@@ -316,6 +326,9 @@ def run():
 
 
 def start():
+    if read_json(SETTINGS, {}).get("mode") == "first_prompt":
+        print("First-prompt mode does not use a background worker.")
+        return 0
     info = read_json(RUNTIME / "runner.json", {})
     if process_alive(info.get("pid")):
         print("Already running.")
