@@ -1,5 +1,7 @@
 # Codex Chat Auto Title v2 · Codex 聊天自动命名
 
+[![Windows](https://img.shields.io/badge/Platform-Windows-0078D4)](#安装和批准-hook) [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB)](#安装和批准-hook) [![CI](https://github.com/kevin-12-ou/codex-chat-auto-title/actions/workflows/ci.yml/badge.svg)](https://github.com/kevin-12-ou/codex-chat-auto-title/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
 [English](README.en.md) · [安装与排障](docs/TROUBLESHOOTING.md) · [实现原理](docs/ARCHITECTURE.md) · [AI 阅读入口](llms.txt)
 
 Windows 上的 Codex 新会话自动改名工具。**UserPromptSubmit Hook 在首条消息时补充一次规则；当前模型先完成任务，再在最终回复前调用 `set_thread_title`。** 后续追问不再注入命名规则。
